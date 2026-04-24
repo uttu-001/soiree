@@ -11,6 +11,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Placeholder for in-progress features and upcoming additions.
 ---
 
+## [0.3.0] — 2026-04-24
+
+### Added
+- `backend/app/schemas/event.py` — EventCreate, EventRead, EventUpdate schemas
+- `backend/app/api/v1/endpoints/events.py` — full CRUD (create, list, get, patch, delete)
+- `scripts/test_api.sh` — API smoke test script
+
+### Verified
+- Event persisted to Postgres with correct fields
+- PATCH partial update working (budget updated 5000 → 6000)
+- Plan generation working on top of persisted event data
+
+---
+
 ## [0.2.0] — 2026-04-24
 
 ### Added
