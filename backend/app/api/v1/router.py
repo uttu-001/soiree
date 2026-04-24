@@ -1,7 +1,27 @@
+"""
+api/v1/router.py — Mounts all endpoint routers under /api/v1.
+
+CONCEPT: APIRouter composition
+--------------------------------
+FastAPI lets you split endpoints across multiple files using APIRouter.
+Each file defines its own router with a local prefix and tags.
+This file composes them all into one api_router that main.py mounts.
+
+Result:
+  POST /api/v1/plans/generate
+  POST /api/v1/plans/chat
+  GET  /api/v1/plans/{plan_id}
+  POST /api/v1/plans/{plan_id}/order
+  ... (events, users, offers, orders to be added as we build them)
+"""
+
 from fastapi import APIRouter
+from app.api.v1.endpoints import plans, events, users, offers, orders
 
 api_router = APIRouter()
 
-# Endpoints will be mounted here as we build them
-# from app.api.v1.endpoints import events, plans, users, offers, orders
-# api_router.include_router(plans.router, prefix="/plans", tags=["plans"])
+api_router.include_router(plans.router, prefix="/plans", tags=["plans"])
+api_router.include_router(events.router, prefix="/events", tags=["events"])
+api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(offers.router, prefix="/offers", tags=["offers"])
+api_router.include_router(orders.router, prefix="/orders", tags=["orders"])

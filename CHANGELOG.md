@@ -7,6 +7,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Placeholder for in-progress features and upcoming additions.
+---
+
+## [0.2.0] — 2026-04-24
+
+### Added
+- `backend/app/schemas/plan.py` — PlanRequest, Guest, EventType, VenueMode enums
+- `backend/app/services/ai/prompts.py` — system + user prompt builders, MCP data injection
+- `backend/app/services/ai/planner.py` — Claude streaming plan generator, SSE, follow-up chat
+- `backend/app/services/offers/engine.py` — live offer fetch, Redis cache (5 min TTL)
+- `backend/app/services/mcp/food.py` — Food MCP client, mock responses
+- `backend/app/services/mcp/instamart.py` — Instamart MCP client, event-type product catalog
+- `backend/app/services/mcp/dineout.py` — Dineout MCP client, slot availability
+- `backend/app/services/mcp/orchestrator.py` — asyncio.gather() parallel coordinator
+- `backend/app/api/v1/endpoints/plans.py` — streaming plan + chat endpoints
+- `backend/app/api/v1/router.py` — all routers mounted
+
+### Milestone
+First successful end-to-end plan generation verified via curl.
+Full pipeline operational: parallel MCP → offers → Claude stream → structured SSE output.
+
 ---
 
 ## [0.1.0] — 2026-04-24
