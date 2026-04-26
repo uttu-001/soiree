@@ -7,7 +7,7 @@
 
 ## What is Soirée?
 
-Soirée is a full-stack AI concierge that orchestrates your entire event experience using Swiggy's three live MCP APIs. You describe your event — who, what, where, budget — and the AI generates a complete plan: restaurant booking, food delivery picks, and grocery cart, all stitched into a minute-by-minute evening timeline.
+Soirée is a full-stack AI concierge that orchestrates complete evening experiences using Swiggy's three live MCP APIs. You describe your event — who, what, where, budget — and the AI generates a complete plan: restaurant booking, food delivery picks, and grocery cart, stitched into a minute-by-minute evening timeline.
 
 Once you approve the plan, the order agent calls Swiggy's APIs autonomously — Dineout reservation, food delivery, and Instamart cart — in a single flow.
 
@@ -27,30 +27,49 @@ No one has built the **full-evening arc** before: start at a restaurant (Dineout
 
 ---
 
+## Current Status
+
+| Layer | Status |
+|---|---|
+| FastAPI backend | ✅ Working |
+| SQLModel DB models (User, Event, Plan) | ✅ Working |
+| Swiggy MCP clients (Food, Instamart, Dineout) | ✅ Mock mode — awaiting credentials |
+| MCP Orchestrator (asyncio.gather) | ✅ Working |
+| Offer engine (Redis cache) | ✅ Working |
+| Claude streaming plan generation | ✅ Working |
+| Events CRUD API | ✅ Working |
+| Next.js frontend | ✅ Working |
+| Swiggy MCP real credentials | ⏳ Access requested |
+| Phone OTP auth | 🔜 Phase 2 |
+| Agentic ordering | 🔜 Phase 2 |
+
+---
+
 ## Features
 
-### Phase 1 — Plan & Present (Weeks 1–6)
+### Phase 1 — Plan & Present ✅ Built
 - **Event setup** — 6 occasion types: Date / Friends Night / Birthday / Corporate / House Party / Family Dinner
-- **Guest roster** — add named guests with per-person dietary tags, or just set a headcount
-- **Location picker** — GPS detect or city/area text search, anchors all Swiggy API calls
+- **Guest roster** — named guests with per-person dietary tags, or headcount-only mode
+- **Location picker** — GPS detect or city/area text search
 - **Venue mode** — Dine Out (Dineout only) / Stay In (Food + Instamart) / Hybrid (full arc)
-- **Health context** — per-guest dietary flags (Veg, Vegan, Keto, Jain, Gluten-Free, Halal, No-Nuts) + group wellness slider
-- **AI plan generation** — streams a complete plan: evening timeline, Dineout recommendation + slot, food delivery options, Instamart cart
-- **Offer & discount engine** — surfaces live Swiggy offers, bank card discounts, Instamart combos; validates at checkout
-- **Plan editor** — swap restaurants, adjust items, regenerate sections via chat
+- **Dietary + health context** — per-guest dietary flags (Veg, Vegan, Keto, Jain, Gluten-Free, Halal, No-Nuts) + wellness slider
+- **AI plan generation** — Claude claude-sonnet-4-20250514 streams a complete plan via SSE: timeline, Dineout pick + slot, food delivery options, Instamart cart
+- **Offer & discount engine** — live Swiggy offers fetched, filtered by budget, displayed with savings
+- **Events persistence** — events saved to Postgres with full CRUD API
 
-### Phase 2 — Approve & Order (Weeks 7–12)
-- **One-tap autonomous ordering** — agent calls `place_food_order` + `checkout` + `book_table` after approval
-- **Live order tracking** — unified status across all 3 Swiggy services
-- **Shareable plan card** — public link with timeline + RSVP for guests
-- **User memory** — learns cuisine preferences, dietary flags, favourite venues across events
-- **Native mobile app** — React Native
+### Phase 2 — Approve & Order 🔜
+- One-tap autonomous ordering — agent calls `place_food_order` + `checkout` + `book_table`
+- Live order tracking across all 3 Swiggy services
+- Shareable plan card with guest RSVP
+- Phone OTP auth (MSG91)
+- User memory — learned preferences across events
+- Native mobile app (React Native)
 
-### Phase 3 — Scale (Weeks 13–20)
-- **Group consensus mode** — guests submit preferences via link; AI finds the menu that satisfies the most constraints
-- **Slack / Teams bot** — `/soiree lunch 12 people` → bot collects preferences, generates plan, places order
-- **Corporate billing** — GST receipts, expense-friendly output
-- **Multi-city support**, repeat event templates, analytics dashboard
+### Phase 3 — Scale 🔜
+- Group consensus mode — guests submit preferences, AI finds optimal menu
+- Slack / Teams bot (`/soiree lunch 12 people`)
+- Corporate billing + GST receipts
+- Multi-city support, repeat event templates
 
 ---
 
@@ -62,80 +81,71 @@ No one has built the **full-evening arc** before: start at a restaurant (Dineout
 User input (event config)
         │
         ▼
-  Context builder
-  (event_type, guests, location, dietary, budget, start_time)
+  FastAPI endpoint — Pydantic validates PlanRequest
         │
         ▼
-  AI Planner (Claude claude-sonnet-4-20250514)
-        │
-        ├──── asyncio.gather() ────────────────────────┐
-        │                                              │
-   Swiggy Food MCP          Swiggy Instamart MCP   Swiggy Dineout MCP
-   search_restaurants       search_products         search_restaurants_dineout
-   get_restaurant_menu      update_cart             get_available_slots
-        │                        │                      │
-        └──────────── results merged ──────────────────┘
+  asyncio.gather() — parallel execution
+  ├── MCPOrchestrator.gather_context()
+  │     ├── FoodMCPClient.search_restaurants()
+  │     ├── InstamartMCPClient.search_products()
+  │     └── DineoutMCPClient.search_restaurants()
+  └── OffersEngine.get_active_offers() [Redis cached, 5min TTL]
         │
         ▼
-  Offer engine (live offers fetched, never cached stale)
+  build_user_prompt() — MCP JSON injected into Claude prompt
         │
         ▼
-  Streaming plan response (SSE → frontend)
-  ┌─ Evening timeline
-  ├─ Dineout card (restaurant + slot)
-  ├─ Food delivery picks (3 options)
-  ├─ Instamart cart (itemised)
-  ├─ Health & dietary insight
-  └─ Total cost breakdown + active offers
+  Claude claude-sonnet-4-20250514 streams response
+  [BRIEF] [TIMELINE] [DINEOUT] [FOOD] [INSTAMART] [HEALTH] [OFFERS] [COST]
         │
         ▼
-  User reviews + edits plan
+  SSE stream → Next.js frontend (ReadableStream reader)
         │
         ▼
-  One-tap approval → Order agent
-        │
-        ├── place_food_order (Food MCP)
-        ├── checkout (Instamart MCP)
-        └── book_table (Dineout MCP)
+  parsePlan() — section markers extracted into structured cards
         │
         ▼
-  Live confirmations (all 3 services)
+  Rendered: Timeline card, Dineout card, Food card, Instamart card,
+            Offers card, Cost card
 ```
 
-### The `asyncio.gather()` Pattern
+### Key Technical Decisions
 
-The core performance win. All three Swiggy MCP calls fire in parallel, not sequentially:
+**1. `asyncio.gather()` for parallel MCP calls**
+All three Swiggy MCP servers fire simultaneously. Serial calls would cost 3× the latency. With gather(), a hybrid event completes in the time of the slowest single call (~300ms vs ~750ms serial).
 
-```python
-# services/mcp/orchestrator.py
-results = await asyncio.gather(
-    food_client.search_restaurants(...),
-    instamart_client.search_products(...),
-    dineout_client.search_restaurants(...),
-    return_exceptions=True,   # degrade gracefully per service
-)
-```
+**2. SSE streaming with `⏎` proxy encoding**
+Claude streams token-by-token. Newlines in the stream were getting dropped by the SSE framing protocol — section markers like `[TIMELINE]` were arriving on empty frames without `data:` prefix and getting lost. Fix: newlines are encoded as `⏎` on the backend before SSE framing, decoded back to `\n` on the frontend after reassembly.
 
-Serial calls would cost 3× the latency. This is non-negotiable at plan generation time.
+**3. Collect-then-send instead of token streaming**
+After testing, token-by-token SSE caused section markers to be split across frames unpredictably. The backend now collects the full Claude response, encodes newlines, and sends as a single SSE message. Trade-off: ~5 second wait, then instant full render.
+
+**4. AI handles reasoning, MCP handles data**
+All restaurant names, prices, slots, and products come from live Swiggy MCP calls. Claude handles tone, sequencing, and plan structure only. This prevents hallucinated restaurant names — a real trust-breaker.
+
+**5. Offers fetched live, re-validated at checkout**
+Offers are fetched at plan generation time with a 5-minute Redis TTL. Re-validated at checkout before any order is placed. Never cached stale.
+
+**6. Mandatory confirmation before any autonomous order**
+The order agent (Phase 2) always surfaces a confirmation screen before calling any Swiggy order API. One-step undo available for 60 seconds post-order via Swiggy cancel API.
 
 ---
 
 ## Tech Stack
 
-### Backend (Python-first)
+### Backend (Python)
 
 | Layer | Technology | Why |
 |---|---|---|
-| API server | **FastAPI** | Async-native, perfect for concurrent MCP calls, Pydantic built-in |
-| AI + MCP | **Anthropic Python SDK** + `mcp` SDK | Native tool chaining, streaming, MCP server connections |
+| API server | **FastAPI** | Async-native, Pydantic built-in, SSE via StreamingResponse |
+| AI | **Anthropic Python SDK** + claude-sonnet-4-20250514 | Native streaming, tool chaining |
+| MCP | **mcp Python SDK** | Connects to all 3 Swiggy MCP servers |
 | Database | **PostgreSQL** + **SQLModel** | SQLAlchemy + Pydantic fused — no schema duplication |
-| Migrations | **Alembic** | Standard for SQLAlchemy projects |
-| Cache + sessions | **Redis** | Offer TTLs, JWT sessions, Celery broker |
-| Background jobs | **Celery** | Async ordering, offer refresh, preference aggregation |
-| Auth | **FastAPI-Users** + **MSG91 OTP** | Phone OTP — India-first auth |
-| Validation | **Pydantic v2** | MCP response models, request validation |
-| HTTP client | **httpx** | Async-compatible, used for MCP + external API calls |
-| Testing | **pytest** + **pytest-asyncio** + **respx** | Mock MCP responses in tests, never hit live APIs in CI |
+| Migrations | **Alembic** | Standard SQLAlchemy migration tool |
+| Cache | **Redis** | Offer TTLs (5min), session storage, Celery broker |
+| Background jobs | **Celery** | Async order placement (Phase 2) |
+| Auth | **FastAPI-Users** + **MSG91 OTP** | Phone OTP — India-first (Phase 2) |
+| Testing | **pytest** + **pytest-asyncio** + **respx** | Mock MCP responses in CI |
 
 ### Frontend
 
@@ -143,18 +153,19 @@ Serial calls would cost 3× the latency. This is non-negotiable at plan generati
 |---|---|
 | Web | Next.js 14 (App Router) |
 | Styling | Tailwind CSS |
-| Animation | Framer Motion |
-| Mobile (Phase 2) | React Native |
+| Fonts | Cormorant Garamond (display) + DM Sans (body) |
+| State | React hooks (useState, useRef, custom usePlanStream) |
+| Streaming | Native fetch + ReadableStream |
 
-### Infra
+### Infrastructure
 
 | Layer | Technology |
 |---|---|
-| Local dev | Docker + docker-compose (API + Celery + Redis + Postgres in one command) |
-| API hosting | Railway |
-| Frontend hosting | Vercel |
-| Database | Supabase (managed Postgres + Redis) |
-| CI/CD | GitHub Actions |
+| Local dev | Docker (soiree-postgres + soiree-redis containers) |
+| Python env | Conda (soiree env, Python 3.12) |
+| API hosting | Railway (planned) |
+| Frontend hosting | Vercel (planned) |
+| CI/CD | GitHub Actions (pytest on push) |
 
 ---
 
@@ -164,181 +175,436 @@ Serial calls would cost 3× the latency. This is non-negotiable at plan generati
 soiree/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                    # FastAPI app, lifespan, CORS
+│   │   ├── main.py                        # FastAPI app, lifespan, CORS
 │   │   ├── core/
-│   │   │   ├── config.py              # Pydantic settings (all env vars)
-│   │   │   ├── database.py            # SQLModel async engine
-│   │   │   └── redis.py               # Redis connection pool
-│   │   ├── models/                    # SQLModel DB models
-│   │   │   ├── user.py
-│   │   │   ├── event.py
-│   │   │   └── plan.py
-│   │   ├── schemas/                   # Pydantic request/response schemas
-│   │   │   ├── user.py
-│   │   │   ├── event.py
-│   │   │   └── plan.py                # PlanRequest, Guest, EventType enums
+│   │   │   ├── config.py                  # Pydantic settings (all env vars)
+│   │   │   ├── database.py                # Async SQLAlchemy engine, session, init_db
+│   │   │   └── redis.py                   # Async Redis singleton client
+│   │   ├── models/                        # SQLModel DB tables
+│   │   │   ├── user.py                    # User (phone auth, preferences)
+│   │   │   ├── event.py                   # Event (occasion, venue, guests, budget)
+│   │   │   └── plan.py                    # Plan (MCP snapshots, timeline, costs, order IDs)
+│   │   ├── schemas/                       # Pydantic request/response shapes
+│   │   │   ├── event.py                   # EventCreate, EventRead, EventUpdate
+│   │   │   └── plan.py                    # PlanRequest, Guest, EventType, VenueMode
 │   │   ├── api/v1/
-│   │   │   ├── router.py              # Mounts all endpoint routers
+│   │   │   ├── router.py                  # Mounts all endpoint routers
 │   │   │   └── endpoints/
-│   │   │       ├── users.py           # Auth, profile
-│   │   │       ├── events.py          # Event CRUD
-│   │   │       ├── plans.py           # Plan generation (SSE stream) + order
-│   │   │       ├── offers.py          # Live offers fetch
-│   │   │       └── orders.py          # Order status tracking
+│   │   │       ├── events.py              # CRUD: create, list, get, patch, delete
+│   │   │       ├── plans.py               # SSE streaming plan generation + chat
+│   │   │       ├── users.py               # Auth endpoints (Phase 2)
+│   │   │       ├── offers.py              # Live offers fetch
+│   │   │       └── orders.py              # Order status tracking (Phase 2)
 │   │   ├── services/
 │   │   │   ├── mcp/
-│   │   │   │   ├── orchestrator.py    # asyncio.gather() across all 3 MCPs
-│   │   │   │   ├── food.py            # Swiggy Food MCP client
-│   │   │   │   ├── instamart.py       # Swiggy Instamart MCP client
-│   │   │   │   └── dineout.py         # Swiggy Dineout MCP client
+│   │   │   │   ├── orchestrator.py        # asyncio.gather() across all 3 MCPs
+│   │   │   │   ├── food.py                # Swiggy Food MCP client + mocks
+│   │   │   │   ├── instamart.py           # Swiggy Instamart MCP client + mocks
+│   │   │   │   └── dineout.py             # Swiggy Dineout MCP client + mocks
 │   │   │   ├── ai/
-│   │   │   │   ├── planner.py         # Claude streaming plan generation
-│   │   │   │   └── prompts.py         # System + user prompt builders
+│   │   │   │   ├── planner.py             # Claude plan generator (collect + SSE encode)
+│   │   │   │   └── prompts.py             # System + user prompt builders
 │   │   │   └── offers/
-│   │   │       └── engine.py          # Live offer fetch + discount logic
+│   │   │       └── engine.py              # Live offer fetch, Redis cache (5min TTL)
 │   │   ├── workers/
-│   │   │   └── tasks.py               # Celery async tasks
+│   │   │   └── tasks.py                   # Celery async tasks (Phase 2)
 │   │   └── utils/
-│   │       ├── location.py            # GPS detect, city normalisation
-│   │       └── dietary.py             # Dietary tag helpers
+│   │       ├── location.py                # GPS detect, city normalisation
+│   │       └── dietary.py                 # Dietary tag helpers
 │   ├── tests/
-│   │   ├── conftest.py                # Shared fixtures (test DB, mock MCP)
+│   │   ├── conftest.py                    # Shared fixtures
 │   │   ├── unit/
-│   │   │   ├── test_planner.py        # AI planner unit tests
-│   │   │   └── test_offers.py         # Offer engine tests
+│   │   │   ├── test_planner.py
+│   │   │   └── test_offers.py
 │   │   └── integration/
-│   │       └── test_mcp.py            # MCP client integration tests
+│   │       └── test_mcp.py
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example
-└── frontend/
-    ├── package.json                ← root of frontend folder
-    ├── next.config.js              ← root of frontend folder
-    ├── tailwind.config.js          ← root of frontend folder
-    ├── tsconfig.json               ← root of frontend folder
-    ├── .env.local                  ← root of frontend folder
-    └── src/
-        ├── app/
-        │   ├── page.tsx            ← home page
-        │   ├── layout.tsx          ← root layout
-        │   └── globals.css         ← global styles
-        ├── types/
-        │   └── index.ts            ← TypeScript types
-        ├── lib/
-        │   ├── api.ts              ← API client
-        │   └── parsePlan.ts        ← plan parser
-        ├── hooks/
-        │   └── usePlanStream.ts    ← streaming hook
-        └── components/
-            ├── event/
-            │   ├── EventForm.tsx
-            │   ├── GuestRoster.tsx
-            │   └── LocationPicker.tsx
-            └── plan/
-                ├── PlanStream.tsx
-                ├── TimelineCard.tsx
-                ├── DineoutCard.tsx
-                ├── FoodCard.tsx
-                ├── InstamartCard.tsx
-                ├── OffersCard.tsx
-                └── CostCard.tsx
+├── frontend/
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── page.tsx                   # Home page (two-column layout)
+│   │   │   ├── layout.tsx                 # Root layout, metadata
+│   │   │   └── globals.css                # Base styles, font imports, CSS vars
+│   │   ├── types/
+│   │   │   └── index.ts                   # Shared TypeScript types (mirrors backend schemas)
+│   │   ├── lib/
+│   │   │   ├── api.ts                     # Fetch client, SSE stream consumer
+│   │   │   └── parsePlan.ts               # Section marker parser, timeline extractor
+│   │   ├── hooks/
+│   │   │   └── usePlanStream.ts           # React hook: stream state management
+│   │   └── components/
+│   │       ├── event/
+│   │       │   ├── EventForm.tsx          # Main form (occasion, venue, budget, time)
+│   │       │   ├── GuestRoster.tsx        # Named guests + dietary tags, or headcount
+│   │       │   └── LocationPicker.tsx     # Text input + GPS detect (Nominatim)
+│   │       └── plan/
+│   │           ├── PlanStream.tsx         # Main plan renderer (idle/streaming/done/error)
+│   │           ├── TimelineCard.tsx       # Evening timeline with connector lines
+│   │           ├── DineoutCard.tsx        # Restaurant reservation card
+│   │           ├── FoodCard.tsx           # Food delivery options card
+│   │           ├── InstamartCard.tsx      # Grocery cart card
+│   │           ├── OffersCard.tsx         # Offers + total savings card
+│   │           └── CostCard.tsx           # Cost breakdown + total card
+│   ├── package.json
+│   ├── next.config.js                     # API proxy rewrites to FastAPI
+│   ├── tailwind.config.js                 # Custom fonts, colors, animations
+│   ├── tsconfig.json                      # Path aliases (@/*)
+│   └── postcss.config.js
 ├── docs/
-│   ├── api.md                         # API reference
-│   ├── mcp-integration.md             # Swiggy MCP setup guide
-│   └── deployment.md                  # Prod deployment guide
 ├── scripts/
-│   ├── setup.sh                       # First-time local setup
-│   └── seed.py                        # DB seed data
+│   └── test_api.sh                        # API smoke test
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                     # Pytest + coverage on push
+│       └── ci.yml                         # pytest + coverage on push
 ├── docker-compose.yml
+├── CHANGELOG.md
 ├── .gitignore
 └── README.md
 ```
 
 ---
 
-## Key Design Decisions
-
-### 1. AI handles reasoning, MCP handles data
-All restaurant names, prices, slots, and products come from live Swiggy MCP calls. Claude handles tone, sequencing, and plan structure only. This prevents hallucinated restaurant names — a real trust-breaker.
-
-### 2. Streaming plan response (SSE)
-Plan generation streams token-by-token from Claude via Server-Sent Events. The frontend renders the plan as it arrives — no waiting for a full JSON response. FastAPI + `StreamingResponse` handles this natively.
-
-### 3. Offers fetched live, validated at checkout
-Offers are fetched at plan generation time with their expiry shown. They're re-validated at checkout before any order is placed. Never cached stale.
-
-### 4. Mandatory confirmation before any autonomous order
-The order agent (Phase 2) always surfaces a confirmation screen before calling any Swiggy order API. One-step undo available for 60 seconds post-order via Swiggy cancel API.
-
-### 5. Per-guest dietary tags drive menu filtering
-Named guests can have individual dietary restrictions. The AI intersects all constraints and filters menus accordingly. For headcount-only events, group-level tags apply to all.
-
----
-
 ## Local Development Setup
 
 ### Prerequisites
-- Python 3.12+
-- Docker + docker-compose
-- Node.js 20+ (frontend)
+- Python 3.12 (via Conda)
+- Docker Desktop
+- Node.js 20+
 
-### 1. Clone and set up environment
+### 1. Clone and configure
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/soiree.git
 cd soiree
 cp backend/.env.example backend/.env
-# Fill in ANTHROPIC_API_KEY and SWIGGY_* keys in backend/.env
+# Fill in ANTHROPIC_API_KEY in backend/.env
 ```
 
-### 2. Start all services
+### 2. Start Docker services
 
 ```bash
-docker-compose up -d
+docker run -d --name soiree-postgres \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=soiree \
+  -p 5432:5432 postgres:16-alpine
+
+docker run -d --name soiree-redis \
+  -p 6379:6379 redis:7-alpine
 ```
 
-This starts: FastAPI (8000) · Celery worker · PostgreSQL (5432) · Redis (6379) · Next.js (3000)
-
-### 3. Run migrations
+### 3. Start backend
 
 ```bash
 cd backend
-alembic upgrade head
+conda activate soiree
+uvicorn app.main:app --reload
+# API running at http://localhost:8000
+# Docs at http://localhost:8000/docs
 ```
 
-### 4. Verify
+### 4. Start frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+# UI running at http://localhost:3000
+```
+
+### 5. Verify
 
 ```bash
 curl http://localhost:8000/health
 # {"status": "ok", "service": "soiree-api"}
 ```
 
-API docs available at: `http://localhost:8000/docs`
+---
 
-### 5. Run tests
+## Debugging Guide
 
-```bash
-cd backend
-pytest tests/ --cov=app -v
-```
+| Symptom | Layer | Fix |
+|---|---|---|
+| App won't start | Config / DB | Check `.env` exists, Docker containers running |
+| `422 Unprocessable Entity` | Schema validation | Read error detail — Pydantic tells you which field |
+| `404 Not Found` | Routing | Check `router.py` — endpoint mounted? |
+| Data not saving | Database | Did you `await session.commit()`? Model imported in `init_db()`? |
+| Plan content wrong | MCP mock data | Check `_mock_search_restaurants()` in `food.py` |
+| Plan not streaming | Planner / SSE | Check `max_tokens`, SSE headers, `⏎` encoding |
+| `MissingGreenlet` error | SQLAlchemy async | Using sync SQLAlchemy code in async context |
+| Tables not created | `init_db()` | Model not imported before `create_all()` |
 
 ---
 
 ## Getting Swiggy MCP Access
 
 1. Apply at [mcp.swiggy.com/builders](https://mcp.swiggy.com/builders)
-2. Describe your use case (life events concierge using all 3 MCP servers)
-3. Receive API keys and MCP server URLs
-4. Add to `backend/.env`:
+2. Select Developer track, request all 3 MCP servers
+3. Once approved, add to `backend/.env`:
    ```
    SWIGGY_MCP_FOOD_URL=...
    SWIGGY_MCP_INSTAMART_URL=...
    SWIGGY_MCP_DINEOUT_URL=...
    SWIGGY_API_KEY=...
    ```
+4. Mock mode switches to live automatically — no code changes needed
+
+---
+
+## Built with
+
+- [Swiggy Builders Club](https://mcp.swiggy.com/builders) — Food, Instamart, Dineout MCP APIs
+- [Anthropic Claude](https://anthropic.com) — AI plan generation (claude-sonnet-4-20250514)
+- [FastAPI](https://fastapi.tiangolo.com) — Async Python API server
+- [SQLModel](https://sqlmodel.tiangolo.com) — Database ORM
+- [Next.js](https://nextjs.org) — React frontend framework
+
+---
+
+## Detailed Data Flow
+
+### Plan Generation Pipeline (step by step)
+
+```
+1. User fills EventForm in browser
+   └── Selects: occasion, venue mode, location, guests, budget, time, dietary, health
+
+2. Frontend calls POST /api/v1/plans/generate
+   └── Pydantic validates PlanRequest — bad fields return 422 before code runs
+
+3. Endpoint creates Plan record in Postgres (status=generating)
+   └── Returns plan_id as first SSE message so frontend knows the ID
+
+4. asyncio.gather() fires all relevant MCP calls IN PARALLEL:
+   ├── FoodMCPClient.search_restaurants(location, dietary, budget_per_head)
+   ├── InstamartMCPClient.search_products(event_type, guest_count, dietary)
+   └── DineoutMCPClient.search_restaurants(location, guests, event_type, slots)
+   + OffersEngine.get_active_offers(location, budget) [Redis cached, 5min TTL]
+
+   Serial latency:   Food(300ms) + Instamart(200ms) + Dineout(250ms) = 750ms
+   Parallel latency: max(300ms, 200ms, 250ms) = 300ms  ← 2.5x faster
+
+5. MCPOrchestrator._process_results() handles failures per-service
+   └── If Dineout fails, Food + Instamart still return — graceful degradation
+
+6. Budget is split across services based on venue_mode:
+   ├── out:    100% Dineout
+   ├── home:   70% Food + 30% Instamart
+   └── hybrid: 50% Dineout + 35% Food + 15% Instamart
+
+7. build_system_prompt() — static, same every request
+   └── Defines Claude's persona, output format with section markers,
+       and critical grounding rule: never invent restaurant names
+
+8. build_user_prompt() — dynamic, different every request
+   └── Serialises all MCP JSON + event config + offers into one prompt string
+       Claude treats this data as ground truth
+
+9. Claude claude-sonnet-4-20250514 generates full response
+   └── collect-then-send: full response collected, newlines encoded as ⏎,
+       sent as single SSE message to avoid marker fragmentation
+
+10. Frontend api.ts receives SSE stream via ReadableStream
+    └── Buffers on \n\n boundaries, decodes ⏎ → \n
+
+11. parsePlan.ts extracts sections using [MARKER] regex
+    └── Returns ParsedPlan: {brief, timeline[], dineout, food, instamart, health, offers, cost}
+
+12. usePlanStream hook updates React state on each chunk
+    └── Components re-render progressively as sections arrive
+
+13. After [DONE] signal, backend parse_plan.py parses same text server-side
+    └── Saves to plans table: status=ready, total_cost, total_savings, all sections
+
+14. User sees complete plan with cards: Timeline, Dineout, Food, Instamart, Offers, Cost
+```
+
+---
+
+## Database Schema
+
+### Table: `users`
+```
+id               VARCHAR  PRIMARY KEY  UUID generated in Python
+phone            VARCHAR  UNIQUE       Indian mobile, e.g. +919876543210
+name             VARCHAR  NULLABLE     Set after first login
+email            VARCHAR  NULLABLE     For receipts and notifications
+preferred_cuisines VARCHAR NULLABLE    JSON string: ["North Indian", "Italian"]
+dietary_tags     VARCHAR  NULLABLE     JSON string: ["Veg", "No-Nuts"]
+default_city     VARCHAR  NULLABLE     e.g. "Lucknow"
+created_at       TIMESTAMP             Auto-set
+updated_at       TIMESTAMP             Updated on every PATCH
+is_active        BOOLEAN               Soft delete flag
+```
+
+### Table: `events`
+```
+id               VARCHAR  PRIMARY KEY  UUID
+user_id          VARCHAR  FK→users     Owner of this event
+event_type       ENUM                  date/friends/birthday/corporate/house_party/family
+venue_mode       ENUM                  out/home/hybrid
+status           ENUM                  draft/planned/ordered/completed/cancelled
+location         VARCHAR               City or address as entered
+latitude         FLOAT    NULLABLE     Resolved via geocoding
+longitude        FLOAT    NULLABLE     Resolved via geocoding
+event_date       TIMESTAMP NULLABLE    Date of event, None = today
+start_hour       INT                   24h format, 10-23
+budget           INT                   Total INR across all Swiggy services
+guest_count      INT                   1-100
+guests           VARCHAR  NULLABLE     JSON: [{"name": "Anjali", "dietary_tags": ["Veg"]}]
+dietary_tags     VARCHAR  NULLABLE     JSON: ["Veg", "Jain"] — group level
+health_focus     INT                   0=indulgent, 100=healthy
+notes            VARCHAR  NULLABLE     Free text context
+created_at       TIMESTAMP
+updated_at       TIMESTAMP
+```
+
+### Table: `plans`
+```
+id               VARCHAR  PRIMARY KEY  UUID
+event_id         VARCHAR  FK→events    Parent event
+user_id          VARCHAR  FK→users     Denormalised for fast user queries
+status           ENUM                  generating/ready/approved/ordering/confirmed/failed
+timeline         VARCHAR  NULLABLE     JSON: [{time, emoji, title, detail}]
+dineout_options  VARCHAR  NULLABLE     Dineout MCP result text
+food_options     VARCHAR  NULLABLE     Food MCP result text
+instamart_cart   VARCHAR  NULLABLE     Instamart MCP result text
+active_offers    VARCHAR  NULLABLE     Offers text shown to user
+health_insight   VARCHAR  NULLABLE     AI dietary note
+dineout_cost     INT      NULLABLE     INR
+food_cost        INT      NULLABLE     INR
+instamart_cost   INT      NULLABLE     INR
+total_cost       INT      NULLABLE     Sum of all services INR
+total_savings    INT      NULLABLE     Total saved via offers INR
+dineout_booking_id VARCHAR NULLABLE   Phase 2: Dineout confirmation
+food_order_id    VARCHAR  NULLABLE     Phase 2: Food order confirmation
+instamart_order_id VARCHAR NULLABLE   Phase 2: Instamart order confirmation
+edit_count       INT                   How many times user edited via chat
+last_edited_at   TIMESTAMP NULLABLE
+created_at       TIMESTAMP
+approved_at      TIMESTAMP NULLABLE   When user clicked "Confirm Plan"
+```
+
+### Relationships
+```
+users (1) ──── (many) events
+events (1) ──── (many) plans   ← user can regenerate multiple times per event
+```
+
+---
+
+## Key Concepts Explained
+
+### async / await — why everything is non-blocking
+Python's `async/await` means the server doesn't freeze while waiting for a DB query or API call. It handles other requests in the meantime. This is critical because a plan generation request involves 3 MCP calls + 1 offers fetch + 1 Claude call — all network operations that take hundreds of milliseconds each.
+
+```python
+# WITHOUT async — server freezes for 750ms per request
+food = food_client.search()       # wait 300ms
+instamart = instamart_client.search()  # wait 200ms
+dineout = dineout_client.search()  # wait 250ms
+
+# WITH async + gather — all 3 fire simultaneously, done in 300ms
+food, instamart, dineout = await asyncio.gather(
+    food_client.search(),
+    instamart_client.search(),
+    dineout_client.search(),
+)
+```
+
+### Dependency Injection — how sessions reach endpoints
+FastAPI automatically creates and injects a DB session into any endpoint that declares `Depends(get_session)`. You never manually open or close sessions — the context manager handles it.
+
+```python
+@router.post("/events/")
+async def create_event(
+    payload: EventCreate,
+    session: AsyncSession = Depends(get_session),  # injected automatically
+):
+    ...
+```
+
+### SSE Streaming — why plans appear token by token
+Server-Sent Events is a browser standard for one-way server→browser streams. The backend yields `data: <content>\n\n` chunks. The browser's `EventSource` or `ReadableStream` receives each chunk as it arrives.
+
+**The `⏎` encoding problem and solution:**
+Claude's output contains newlines. When sent over SSE, a bare newline `\n` is interpreted as an SSE message separator — causing section markers like `[TIMELINE]` to arrive on empty frames and get dropped. Solution: encode all `\n` as `⏎` on the backend before SSE framing, decode back on the frontend after reassembly.
+
+### Mock-first MCP — how switching to real credentials works
+Every MCP client checks one flag at init:
+```python
+self.use_mock = not bool(self.server_url and self.api_key)
+```
+If Swiggy credentials aren't in `.env`, mock data is returned with the exact same shape as real responses. When credentials arrive, set them in `.env` — the entire pipeline switches to live data with zero code changes.
+
+### Schemas vs Models — why they're separate
+**Models** (`models/`) define DB tables — what goes into Postgres.
+**Schemas** (`schemas/`) define API shapes — what the client sends and receives.
+
+They're separate because:
+- DB models have internal fields the API should never expose (raw FK IDs)
+- API schemas have validation rules that don't belong in DB models
+- You often want different fields for create vs read vs update operations
+
+### PlanStatus State Machine
+```
+generating → ready → approved → ordering → confirmed
+                              ↘ failed
+```
+Each transition is triggered by a specific action:
+- `generating`: set when Claude streaming starts
+- `ready`: set when streaming + DB save completes
+- `approved`: set when user clicks "Confirm Plan" (Phase 2)
+- `ordering`: set when order agent begins calling Swiggy APIs (Phase 2)
+- `confirmed`: set when all order IDs received (Phase 2)
+- `failed`: set if any Swiggy order call fails (Phase 2)
+
+---
+
+## Debugging Flowchart
+
+```
+Bug appears
+    │
+    ├── App won't start
+    │     ├── Check: does backend/.env exist?
+    │     ├── Check: are Docker containers running? (docker ps)
+    │     └── Check: is ANTHROPIC_API_KEY set in .env?
+    │
+    ├── 422 Unprocessable Entity
+    │     └── Pydantic validation failed — read the error detail,
+    │         it tells you exactly which field and why
+    │
+    ├── 404 Not Found
+    │     └── Check router.py — is the endpoint mounted?
+    │         Check the URL — prefix is /api/v1/...
+    │
+    ├── Data not saving to DB
+    │     ├── Did you await session.commit()?
+    │     ├── Is the model imported in init_db() before create_all()?
+    │     └── Check: psql \dt — does the table exist?
+    │
+    ├── Plan generates but content is wrong
+    │     ├── Check mock data in services/mcp/food.py _mock_search_restaurants()
+    │     └── Add print(user_prompt) in planner.py to see what Claude receives
+    │
+    ├── Plan not streaming / 500 error
+    │     ├── Check uvicorn terminal — full traceback is there
+    │     ├── Check ANTHROPIC_API_KEY is valid
+    │     └── Check max_tokens in planner.py (currently 2000)
+    │
+    ├── ⏎ symbols visible in frontend
+    │     └── parsePlan.ts — check .replace(/⏎/g, '\n') is present in parsePlan()
+    │
+    ├── Section markers missing ([TIMELINE] not found)
+    │     └── Check api.ts — buffer accumulation on \n\n boundaries
+    │
+    └── ForeignKeyViolationError on plan insert
+          └── event_id doesn't exist in events table —
+              ensure demo event is created before plan
+```
 
 ---
 
@@ -350,21 +616,43 @@ pytest tests/ --cov=app -v
 | Agentic order errors | High | Mandatory confirmation screen. 60s undo window. Dry-run mode before Phase 2 goes live. |
 | Offer data staleness | Medium | Fetched live at generation. Expiry shown on every badge. Re-validated at checkout. |
 | Dineout slot gone by checkout | Medium | Show 3 restaurant options with pre-fetched slots. AI auto-suggests next available time if preferred slot gone. |
-| AI hallucinating restaurants | Low | All names/prices come from MCP data. Claude never invents food data. |
+| AI hallucinating restaurants | Low | All names/prices come from MCP data. Claude never invents food data. Enforced in system prompt. |
+| SSE marker fragmentation | Low | Solved via ⏎ proxy encoding — newlines encoded before SSE framing, decoded after reassembly. |
+| Schema drift frontend↔backend | Low | TypeScript types in types/index.ts mirror Pydantic schemas exactly. Update both when changing either. |
+
+---
+
+## Versioning Strategy
+
+| Version | Meaning |
+|---|---|
+| `0.x.0` | Phase 1 milestones |
+| `0.x.x` | Incremental additions within a phase |
+| `1.0.0` | Phase 1 complete — plan & present fully working |
+| `2.0.0` | Phase 2 complete — agentic ordering |
+| `3.0.0` | Phase 3 complete — corporate + social scale |
 
 ---
 
 ## Roadmap
 
-- [ ] Phase 1: MVP — event setup, guest roster, location, AI plan generation, offer engine
-- [ ] Phase 2: Agentic ordering, shareable plan card, user memory, mobile app
-- [ ] Phase 3: Group consensus mode, Slack bot, corporate billing, multi-city
-
----
-
-## Built with
-
-- [Swiggy Builders Club](https://mcp.swiggy.com/builders) — Food, Instamart, Dineout MCP APIs
-- [Anthropic Claude](https://anthropic.com) — AI plan generation and order orchestration
-- [FastAPI](https://fastapi.tiangolo.com) — Async Python API server
-- [SQLModel](https://sqlmodel.tiangolo.com) — Database ORM
+- [x] Project scaffold — directory structure, README, CI
+- [x] Core foundation — database, Redis, models (User, Event, Plan)
+- [x] Swiggy MCP clients — Food, Instamart, Dineout (mock mode)
+- [x] MCP Orchestrator — asyncio.gather() parallel coordinator
+- [x] Offer engine — live fetch, Redis cache
+- [x] AI planner — Claude streaming, SSE encoding
+- [x] Events CRUD API
+- [x] Plan persistence — save to DB after generation
+- [x] Next.js frontend — streaming plan UI
+- [ ] Follow-up chat UI
+- [ ] Alembic migrations
+- [ ] Unit + integration tests
+- [ ] Real Swiggy MCP credentials
+- [ ] Phone OTP auth (Phase 2)
+- [ ] Agentic ordering (Phase 2)
+- [ ] Shareable plan card (Phase 2)
+- [ ] User memory / preference learning (Phase 2)
+- [ ] Group consensus mode (Phase 3)
+- [ ] Slack / Teams bot (Phase 3)
+- [ ] Corporate billing + GST receipts (Phase 3)
