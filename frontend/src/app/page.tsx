@@ -63,6 +63,7 @@ export default function Home() {
           <PlanStream
             streamState={streamState}
             onReset={reset}
+            eventData={lastRequest ? (lastRequest as unknown as Record<string, unknown>) : {}}
           />
         </section>
       </div>

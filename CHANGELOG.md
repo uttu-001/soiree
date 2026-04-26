@@ -9,6 +9,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - Placeholder for in-progress features and upcoming additions.
+
+---
+
+## [0.6.0] — 2026-04-26
+
+### Added
+- `frontend/src/hooks/useChatStream.ts` — multi-turn chat with conversation history
+- `frontend/src/components/plan/ChatPanel.tsx` — chat UI with suggestion chips
+- `/plans/chat` endpoint fixed to accept JSON body via ChatRequest schema
+
+### Milestone
+Full chat loop working — context-aware follow-up refinement with location-specific responses.
+
 ---
 
 ## [0.5.0] — 2026-04-26

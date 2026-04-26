@@ -27,13 +27,15 @@ import { FoodCard } from './FoodCard'
 import { InstamartCard } from './InstamartCard'
 import { OffersCard } from './OffersCard'
 import { CostCard } from './CostCard'
+import { ChatPanel } from './ChatPanel'
 
 interface Props {
   streamState: StreamState
   onReset: () => void
+  eventData?: Record<string, unknown>
 }
 
-export function PlanStream({ streamState, onReset }: Props) {
+export function PlanStream({ streamState, onReset, eventData = {} }: Props) {
   const { status, plan } = streamState
 
   // Empty state — no plan generated yet
@@ -111,6 +113,10 @@ return (
         </button>
       </div>
     )}
+      {/* Follow-up chat — shown when plan is complete */}
+      {status === 'done' && (
+        <ChatPanel eventData={eventData} />
+      )}
 
   </div>
 )

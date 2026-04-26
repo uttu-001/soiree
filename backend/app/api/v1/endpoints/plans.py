@@ -34,6 +34,8 @@ ENDPOINTS:
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
+
 
 from app.core.database import get_session
 from app.schemas.plan import PlanRequest
@@ -134,12 +136,14 @@ async def create_plan_endpoint(
     )
 
 
+class ChatRequest(BaseModel):
+    user_message: str
+    event_data: dict = {}
+    conversation_history: list[dict] = []
+
+
 @router.post("/chat", summary="Follow-up chat on an existing plan (streaming)")
-async def chat_followup(
-    user_message: str,
-    event_data: dict,
-    conversation_history: list[dict] = [],
-):
+async def chat_followup(request: ChatRequest):
     """
     Handle follow-up messages after a plan is generated.
     E.g. "make it more romantic", "switch to Italian cuisine".
@@ -147,9 +151,9 @@ async def chat_followup(
 
     async def event_stream():
         async for chunk in generate_followup(
-            user_message=user_message,
-            conversation_history=conversation_history,
-            event_data=event_data,
+            user_message=request.user_message,
+            conversation_history=request.conversation_history,
+            event_data=request.event_data,
         ):
             yield chunk
 
