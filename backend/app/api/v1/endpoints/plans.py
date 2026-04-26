@@ -1,78 +1,135 @@
 """
-api/v1/endpoints/plans.py — Plan generation and management endpoints.
+api/v1/endpoints/plans.py — Plan generation, persistence and retrieval.
 
-CONCEPT: StreamingResponse for SSE
--------------------------------------
-Normal FastAPI endpoints return a complete JSON response at once.
-For plan generation, we stream Claude's output token-by-token using
-Server-Sent Events (SSE) — the browser receives and renders each chunk
-as it arrives, so the user sees the plan being written in real time.
+CONCEPT: How persistence works with streaming
+----------------------------------------------
+Streaming and DB persistence seem to conflict — streaming sends data
+immediately while DB writes happen after. We solve this by:
 
-FastAPI's StreamingResponse accepts an async generator and streams
-whatever it yields directly to the HTTP response.
+  1. Create a Plan record (status=generating) BEFORE streaming starts
+     → gives us a plan_id immediately
+  2. Stream Claude's response to the frontend chunk by chunk
+     → user sees plan being written in real time
+  3. Accumulate the full text server-side while streaming
+     → we build the complete text in memory
+  4. After stream completes, parse + save to DB (status=ready)
+     → plan is now persisted
 
-SSE headers:
-  Content-Type: text/event-stream   ← tells browser this is an SSE stream
-  Cache-Control: no-cache           ← don't buffer the stream
-  X-Accel-Buffering: no             ← disable Nginx buffering (important in prod)
+The frontend receives:
+  - First chunk: "data: PLAN_ID:<uuid>\n\n" — so it knows the plan ID
+  - Subsequent chunks: plan text tokens
+  - Final chunk: "data: [DONE]\n\n"
 
-CONCEPT: How the frontend consumes this
------------------------------------------
-The Next.js frontend uses the browser's EventSource API or a fetch
-with ReadableStream to consume the SSE. Each "data: <token>\n\n" chunk
-is appended to the UI string, and section markers like [TIMELINE] trigger
-rendering of specific plan components.
+This way the frontend can show the plan ID and link to it
+even before the plan is fully saved.
 
-ENDPOINTS IN THIS FILE:
-  POST /plans/generate     → stream a new plan (SSE)
-  POST /plans/chat         → follow-up chat message (SSE)
-  GET  /plans/{plan_id}    → fetch a saved plan (Phase 2)
-  POST /plans/{plan_id}/order → place all orders (Phase 2)
+ENDPOINTS:
+  POST /plans/generate         → stream plan + persist to DB
+  POST /plans/chat             → follow-up chat (streaming)
+  GET  /plans/{plan_id}        → fetch saved plan
+  GET  /plans/event/{event_id} → all plans for an event
+  POST /plans/{plan_id}/order  → place orders (Phase 2)
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_session
 from app.schemas.plan import PlanRequest
+from app.schemas.plan_response import PlanReadResponse
 from app.services.ai.planner import generate_plan, generate_followup
+from app.services.plan_service import (
+    create_plan,
+    update_plan_text,
+    get_plan,
+    get_event_plans,
+    list_user_plans,
+)
+from app.lib.parse_plan import parse_plan_text
+
+# Temporary demo user until auth is built in Phase 2
+DEMO_USER_ID = "demo-user-001"
 
 router = APIRouter()
 
 
-@router.post("/generate", summary="Generate an event plan (streaming)")
-async def create_plan(request: PlanRequest):
+@router.post("/generate", summary="Generate an event plan (streaming + persistent)")
+async def create_plan_endpoint(
+    request: PlanRequest,
+    session: AsyncSession = Depends(get_session),
+):
     """
-    Generate a complete event plan using Swiggy MCP + Claude.
+    Generate a plan, stream it to the frontend, and persist it to DB.
 
-    Returns a Server-Sent Events stream. Each chunk is a piece of the
-    plan text as Claude writes it. The stream ends with "data: [DONE]".
+    Returns SSE stream. First message is the plan_id so the frontend
+    can reference it. Subsequent messages are plan text. Final message
+    is [DONE].
 
-    Flow:
-      1. Validate PlanRequest (Pydantic handles this automatically)
-      2. Fire parallel Swiggy MCP calls (Food + Instamart + Dineout)
-      3. Fetch live offers
-      4. Stream Claude's plan generation token-by-token
-
-    Frontend usage:
-      const response = await fetch('/api/v1/plans/generate', {
-        method: 'POST',
-        body: JSON.stringify(planRequest),
-      });
-      const reader = response.body.getReader();
-      // read chunks and append to UI
+    The event_id in PlanRequest is optional for now — if not provided,
+    the plan is saved without an event link (demo mode).
     """
+    # Ensure demo user and a demo event exist before creating plan
+    from app.api.v1.endpoints.events import _ensure_demo_user
+    from app.models.event import Event, EventType, VenueMode, EventStatus
+    from sqlmodel import select
+
+    await _ensure_demo_user(session)
+
+    # Get or create a demo event to satisfy the foreign key
+    result = await session.execute(
+        select(Event).where(Event.user_id == DEMO_USER_ID).limit(1)
+    )
+    demo_event = result.scalar_one_or_none()
+    if not demo_event:
+        demo_event = Event(
+            user_id=DEMO_USER_ID,
+            event_type=request.event_type,
+            venue_mode=request.venue_mode,
+            location=request.location,
+            start_hour=request.start_hour,
+            budget=request.budget,
+            guest_count=request.guest_count,
+        )
+        session.add(demo_event)
+        await session.commit()
+        await session.refresh(demo_event)
+
+    plan_db = await create_plan(
+        session=session,
+        event_id=demo_event.id,
+        user_id=DEMO_USER_ID,
+    )
 
     async def event_stream():
-        async for chunk in generate_plan(request.model_dump()):
-            yield chunk
+        # Send plan_id as first message so frontend knows the ID
+        yield f"data: PLAN_ID:{plan_db.id}\n\n"
+
+        accumulated = ""
+        try:
+            async for chunk in generate_plan(request.model_dump()):
+                accumulated += chunk
+                yield chunk
+
+            # Stream complete — parse and save to DB
+            parsed = parse_plan_text(accumulated)
+            await update_plan_text(
+                session=session,
+                plan_id=plan_db.id,
+                raw_text=accumulated,
+                parsed=parsed,
+            )
+
+        except Exception as e:
+            yield f"data: [ERROR] {str(e)}\n\n"
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # Disable Nginx buffering in production
-            "Access-Control-Allow-Origin": "*",  # Allow frontend to read the stream
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
         },
     )
 
@@ -85,17 +142,7 @@ async def chat_followup(
 ):
     """
     Handle follow-up messages after a plan is generated.
-
-    E.g. "make it more romantic", "we added a vegan guest",
-    "suggest cocktail pairings", "switch the restaurant to Italian".
-
-    The conversation_history maintains context across multiple follow-ups
-    so the user doesn't have to repeat themselves.
-
-    Args:
-        user_message: the follow-up question or instruction
-        event_data: original event config (passed from frontend state)
-        conversation_history: list of {role, content} dicts from this session
+    E.g. "make it more romantic", "switch to Italian cuisine".
     """
 
     async def event_stream():
@@ -113,26 +160,44 @@ async def chat_followup(
     )
 
 
-@router.get("/{plan_id}", summary="Fetch a saved plan")
-async def get_plan(plan_id: str):
+@router.get("/event/{event_id}", summary="All plans for an event")
+async def get_plans_for_event(
+    event_id: str,
+    session: AsyncSession = Depends(get_session),
+):
     """
-    Retrieve a previously generated and saved plan by ID.
-    Phase 2 feature — requires user auth and plan persistence.
+    Fetch all plans generated for a specific event.
+    Returns newest first — useful for showing regeneration history.
     """
-    raise HTTPException(status_code=501, detail="Plan persistence coming in Phase 2")
+    plans = await get_event_plans(session=session, event_id=event_id)
+    return plans
+
+
+@router.get("/history", summary="Recent plans for the current user")
+async def get_plan_history(
+    session: AsyncSession = Depends(get_session),
+):
+    """Fetch the 20 most recent ready plans for the demo user."""
+    plans = await list_user_plans(session=session, user_id=DEMO_USER_ID)
+    return plans
+
+
+@router.get("/{plan_id}", summary="Fetch a saved plan by ID")
+async def get_plan_endpoint(
+    plan_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Retrieve a previously generated and saved plan."""
+    plan = await get_plan(session=session, plan_id=plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail=f"Plan {plan_id} not found")
+    return plan
 
 
 @router.post("/{plan_id}/order", summary="Place all orders for an approved plan")
 async def place_order(plan_id: str):
     """
-    Agentic ordering: approve a plan and let the AI place all Swiggy orders.
-
-    Calls in sequence:
-      1. book_table (Dineout MCP) — if dineout is in the plan
-      2. place_food_order (Food MCP) — if food delivery is in the plan
-      3. checkout (Instamart MCP) — if Instamart cart is in the plan
-
-    Always shows a confirmation screen before this endpoint is called.
-    Phase 2 feature.
+    Agentic ordering — Phase 2 feature.
+    Will call: book_table (Dineout) + place_food_order (Food) + checkout (Instamart)
     """
     raise HTTPException(status_code=501, detail="Agentic ordering coming in Phase 2")
