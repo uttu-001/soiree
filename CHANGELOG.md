@@ -12,6 +12,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.0] — 2026-04-26
+
+### Added
+- Alembic migrations replacing create_all()
+- alembic/env.py — SQLModel metadata + model imports
+- Initial migration: users, events, plans tables
+
+### Changed
+- core/database.py — init_db() no longer calls create_all()
+- Schema changes now done via: alembic revision --autogenerate + alembic upgrade head
+
+---
+
 ## [0.6.0] — 2026-04-26
 
 ### Added

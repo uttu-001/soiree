@@ -62,26 +62,22 @@ AsyncSessionLocal = sessionmaker(
 
 async def init_db() -> None:
     """
-    Create all database tables on application startup.
+    Import models so SQLModel.metadata is populated.
 
-    SQLModel.metadata contains a registry of every class marked with
-    `table=True`. run_sync() is needed because SQLAlchemy's DDL (CREATE TABLE)
-    operations are synchronous — we run them inside an async context using
-    this bridge.
+    We no longer call create_all() here — Alembic owns all schema
+    management via migration files in alembic/versions/.
 
-    In production you'd use Alembic migrations instead of create_all(),
-    because create_all() can't handle schema *changes* (adding columns etc).
-    For now it's fine for development — we'll add Alembic in a later step.
+    To create or modify tables:
+      alembic revision --autogenerate -m "description"
+      alembic upgrade head
+
+    We still import models here so that any code referencing
+    SQLModel.metadata (e.g. tests) has the full schema available.
     """
-    # Models must be imported here so SQLModel.metadata knows about them
-    # before create_all() runs. Order matters — User first (no dependencies),
-    # then Event and Plan (both have foreign keys to users).
+    # Models must be imported so SQLModel.metadata knows about them
     from app.models.user import User  # noqa: F401
     from app.models.event import Event  # noqa: F401
     from app.models.plan import Plan  # noqa: F401
-
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
