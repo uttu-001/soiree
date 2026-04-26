@@ -157,17 +157,20 @@ async def generate_plan(event_data: dict[str, Any]) -> AsyncIterator[str]:
         # client.messages.stream() opens a streaming connection to Anthropic.
         # We use claude-sonnet-4-20250514 — best balance of speed and quality.
         # max_tokens=2000: enough for a full plan with all sections.
-        async with client.messages.stream(
+# Collect full response then send as one chunk.
+        # Streaming token-by-token causes section markers to arrive
+        # on separate SSE frames without data: prefix, getting dropped.
+        # Trade-off: user waits ~5s then sees complete plan at once.
+        message = await client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
-        ) as stream:
-            async for text in stream.text_stream:
-                # Yield each token in SSE format
-                # The double newline \n\n is required by the SSE spec —
-                # it signals the end of one event to the browser's EventSource
-                yield f"data: {text}\n\n"
+        )
+        full_text = message.content[0].text
+        # Send as single SSE message with newlines encoded
+        safe = full_text.replace('\n', '⏎')
+        yield f"data: {safe}\n\n"
 
         # Signal stream completion to frontend
         yield "data: [DONE]\n\n"
@@ -226,7 +229,11 @@ Never invent new restaurant names or prices — refer only to what was in the or
             messages=messages,
         ) as stream:
             async for text in stream.text_stream:
-                yield f"data: {text}\n\n"
+                # Replace newlines within chunk so each SSE message
+                # stays on one line — prevents markers getting split
+                # across multiple SSE frames and losing their prefix
+                safe = text.replace('\n', '⏎')
+                yield f"data: {safe}\n\n"
         yield "data: [DONE]\n\n"
     except Exception as e:
         yield f"data: [ERROR] {str(e)}\n\n"

@@ -211,13 +211,37 @@ soiree/
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example
-├── frontend/
-│   ├── src/
-│   │   ├── app/                       # Next.js App Router pages
-│   │   ├── components/                # UI components
-│   │   ├── lib/                       # API client, utils
-│   │   └── hooks/                     # Custom React hooks
-│   └── public/
+└── frontend/
+    ├── package.json                ← root of frontend folder
+    ├── next.config.js              ← root of frontend folder
+    ├── tailwind.config.js          ← root of frontend folder
+    ├── tsconfig.json               ← root of frontend folder
+    ├── .env.local                  ← root of frontend folder
+    └── src/
+        ├── app/
+        │   ├── page.tsx            ← home page
+        │   ├── layout.tsx          ← root layout
+        │   └── globals.css         ← global styles
+        ├── types/
+        │   └── index.ts            ← TypeScript types
+        ├── lib/
+        │   ├── api.ts              ← API client
+        │   └── parsePlan.ts        ← plan parser
+        ├── hooks/
+        │   └── usePlanStream.ts    ← streaming hook
+        └── components/
+            ├── event/
+            │   ├── EventForm.tsx
+            │   ├── GuestRoster.tsx
+            │   └── LocationPicker.tsx
+            └── plan/
+                ├── PlanStream.tsx
+                ├── TimelineCard.tsx
+                ├── DineoutCard.tsx
+                ├── FoodCard.tsx
+                ├── InstamartCard.tsx
+                ├── OffersCard.tsx
+                └── CostCard.tsx
 ├── docs/
 │   ├── api.md                         # API reference
 │   ├── mcp-integration.md             # Swiggy MCP setup guide

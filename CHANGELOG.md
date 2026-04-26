@@ -11,6 +11,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Placeholder for in-progress features and upcoming additions.
 ---
 
+## [0.4.0] — 2026-04-26
+
+### Added
+- Full Next.js frontend with streaming plan UI
+- EventForm, GuestRoster, LocationPicker components
+- PlanStream with progressive section rendering
+- TimelineCard, DineoutCard, FoodCard, InstamartCard, OffersCard, CostCard
+- usePlanStream hook managing SSE stream state
+- parsePlan utility for section extraction
+- SSE buffer fix and ⏎ newline encoding
+
+### Milestone
+First complete end-to-end plan visible in browser with all sections rendering correctly.
+
 ## [0.3.0] — 2026-04-24
 
 ### Added

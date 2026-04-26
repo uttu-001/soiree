@@ -226,5 +226,14 @@ ACTIVE SWIGGY OFFERS
 ═══════════════════════════════
 {offers_json}
 
-Now generate the complete event plan following the output format in your instructions.
-Use only the restaurant names, dish names, prices, and slot times from the data above."""
+Now generate the complete event plan. You MUST include ALL of these markers exactly as shown, in this exact order, with no exceptions:
+[BRIEF]
+[TIMELINE]
+[DINEOUT]
+[FOOD]
+[INSTAMART]
+[HEALTH]
+[OFFERS]
+[COST]
+
+Each marker must appear on its own line. Use only restaurant names, dish names, prices, and slot times from the MCP data above."""
